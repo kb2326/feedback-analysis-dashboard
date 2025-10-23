@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  feedback-dashboard:
+    build: .
+    ports:
+      - "8501:8501"
+    environment:
+      - DB_HOST=${DB_HOST:-localhost}
+      - DB_USER=${DB_USER:-root}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=${DB_NAME:-feedback_db}
+      - DB_PORT=${DB_PORT:-3306}
+    volumes:
+      - ./data:/app/data  # Mount data directory for CSV files
+    depends_on:
+      - mysql
+    restart: unless-stopped
+
+  mysql:
+    image: mysql:8.0
+    environment:
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-rootpassword}
+      - MYSQL_DATABASE=${DB_NAME:-feedback_db}
+      - MYSQL_USER=${DB_USER:-appuser}
+      - MYSQL_PASSWORD=${DB_PASSWORD:-apppassword}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./sql:/docker-entrypoint-initdb.d  # Initialize database with SQL files
+    restart: unless-stopped
+
+volumes:
+  mysql_data:
