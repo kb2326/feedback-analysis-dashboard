@@ -13,8 +13,28 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Import functions from app (we'll need to mock streamlit)
-with patch.dict('sys.modules', {'streamlit': MagicMock()}):
-    from app import process_data, calculate_correlations, perform_topic_modeling, segment_users
+streamlit_mock = MagicMock()
+streamlit_mock.cache_data.side_effect = lambda func=None, **_kwargs: (
+    func if func is not None else lambda wrapped: wrapped
+)
+
+
+class StubSentimentIntensityAnalyzer:
+    """Small deterministic replacement for tests that do not exercise VADER."""
+
+    def polarity_scores(self, text):
+        return {'compound': 0.25 if str(text).strip() else 0.0}
+
+
+with patch.dict('sys.modules', {'streamlit': streamlit_mock}):
+    import app as app_module
+
+    app_module.SentimentIntensityAnalyzer = StubSentimentIntensityAnalyzer
+    calculate_correlations = app_module.calculate_correlations
+    normalize_feedback_columns = app_module.normalize_feedback_columns
+    perform_topic_modeling = app_module.perform_topic_modeling
+    process_data = app_module.process_data
+    segment_users = app_module.segment_users
 
 
 class TestAppFunctions:
@@ -67,6 +87,35 @@ class TestAppFunctions:
             assert 'positive_sentiment' in processed_df.columns
         if 'what_could_be_improved' in processed_df.columns:
             assert 'improvement_sentiment' in processed_df.columns
+
+    def test_normalize_xquik_tweet_export_columns(self):
+        """Test Xquik tweet export columns are accepted as feedback input."""
+        xquik_df = pd.DataFrame({
+            'Tweet Text': ['Great launch thread', '   ', 'Needs clearer docs'],
+            'Tweet Created At': ['2026-07-01T10:00:00Z', '', '2026-07-02T11:00:00Z'],
+        })
+
+        normalized_df = normalize_feedback_columns(xquik_df)
+        processed_df = process_data(xquik_df)
+
+        assert list(normalized_df['what_did_you_like']) == [
+            'Great launch thread',
+            'Needs clearer docs',
+        ]
+        assert list(normalized_df['source']) == ['xquik', 'xquik']
+        assert 'datetime_originally_submitted' in processed_df.columns
+        assert pd.api.types.is_datetime64_any_dtype(processed_df['datetime_originally_submitted'])
+
+    def test_normalize_preserves_native_feedback_columns(self):
+        """Test native feedback text is not replaced by alternate aliases."""
+        df = pd.DataFrame({
+            'what_did_you_like': ['Native feedback'],
+            'Tweet Text': ['Should not replace native feedback'],
+        })
+
+        normalized_df = normalize_feedback_columns(df)
+
+        assert normalized_df.loc[0, 'what_did_you_like'] == 'Native feedback'
     
     def test_calculate_correlations(self):
         """Test correlation calculation function."""

@@ -181,9 +181,72 @@ def load_data_from_database(dashboard_type, filters=None):
         return None
 
 # Load and preprocess data
+TEXT_COLUMN_ALIASES = (
+    'what_did_you_like',
+    'feedback',
+    'review',
+    'review_text',
+    'text',
+    'tweet',
+    'tweet_text',
+    'Tweet Text',
+)
+DATE_COLUMN_ALIASES = (
+    'datetime_originally_submitted',
+    'created_at',
+    'created',
+    'date',
+    'tweet_created',
+    'Tweet Created At',
+)
+XQUIK_TEXT_ALIASES = ('tweet_text', 'Tweet Text')
+
+
+def _column_key(column):
+    return ''.join(char.lower() for char in str(column) if char.isalnum())
+
+
+def _find_column(df, aliases):
+    columns_by_key = {_column_key(column): column for column in df.columns}
+    for alias in aliases:
+        match = columns_by_key.get(_column_key(alias))
+        if match is not None:
+            return match
+    return None
+
+
+def normalize_feedback_columns(df):
+    """Map common feedback and tweet export columns into dashboard fields."""
+    result = df.copy()
+
+    text_column = None
+    if 'what_did_you_like' not in result.columns:
+        text_column = _find_column(result, TEXT_COLUMN_ALIASES)
+        if text_column is not None:
+            result.rename(columns={text_column: 'what_did_you_like'}, inplace=True)
+    if text_column is not None and 'source' not in result.columns:
+        source = 'xquik' if _column_key(text_column) in {
+            _column_key(alias) for alias in XQUIK_TEXT_ALIASES
+        } else 'csv'
+        result['source'] = source
+
+    if 'datetime_originally_submitted' not in result.columns:
+        date_column = _find_column(result, DATE_COLUMN_ALIASES)
+        if date_column is not None:
+            result.rename(columns={date_column: 'datetime_originally_submitted'}, inplace=True)
+
+    if 'what_did_you_like' in result.columns:
+        result['what_did_you_like'] = result['what_did_you_like'].fillna('').astype(str).str.strip()
+        result = result[result['what_did_you_like'] != '']
+
+    return result
+
+
 @st.cache_data
 def process_data(df):
     """Process the uploaded dataframe"""
+    df = normalize_feedback_columns(df)
+
     # Data Cleaning
     df.drop_duplicates(inplace=True)
     
